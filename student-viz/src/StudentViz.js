@@ -252,8 +252,23 @@ const StudentPositionVisualization = () => {
         return;
       }
       
-      // Apply Design and Pattern pass filters
-      let filteredStudents = labData.filter(student => {
+      // Get all students who passed design (eligible for grading)
+      // In Lab03, anyone who passed design (1st_demo or 2nd_demo) is eligible
+      const eligibleStudents = labData.filter(student => 
+        (student["Design Pass"] === "1st_demo" || student["Design Pass"] === "2nd_demo") &&
+        typeof student[metric] === 'number' && 
+        !isNaN(student[metric])
+      );
+      
+      if (eligibleStudents.length === 0) {
+        setErrorMessage("No students with valid design pass found");
+        setStudentData(null);
+        setLoading(false);
+        return;
+      }
+      
+      // Now apply the actual filters for visualization (both design and pattern)
+      let filteredStudents = eligibleStudents.filter(student => {
         // Check Design Pass filter
         const designMatch = (designFilter.first && student["Design Pass"] === "1st_demo") || 
                           (designFilter.second && student["Design Pass"] === "2nd_demo");
@@ -262,10 +277,8 @@ const StudentPositionVisualization = () => {
         const patternMatch = (patternFilter.first && student["Pattern Pass"] === "1st_demo") || 
                            (patternFilter.second && student["Pattern Pass"] === "2nd_demo");
         
-        // Both design and pattern conditions must be met
-        return designMatch && patternMatch && 
-               typeof student[metric] === 'number' && 
-               !isNaN(student[metric]);
+        // Both design and pattern conditions must be met for display
+        return designMatch && patternMatch;
       });
       
       if (filteredStudents.length === 0) {
@@ -281,25 +294,34 @@ const StudentPositionVisualization = () => {
       // For metrics where lower values are better (assumed for all metrics)
       const isLowerBetter = true;
       
-      // Sort students by the selected metric
-      const sortedStudents = [...filteredStudents].sort((a, b) => 
+      // Sort ALL eligible students by the selected metric for true ranking
+      const sortedEligibleStudents = [...eligibleStudents].sort((a, b) => 
         isLowerBetter ? a[metric] - b[metric] : b[metric] - a[metric]
       );
       
-      // Find student's rank
-      const studentRank = sortedStudents.findIndex(s => s.Account === targetStudentId) + 1;
+      // Sort filtered students for display
+      const sortedFilteredStudents = [...filteredStudents].sort((a, b) => 
+        isLowerBetter ? a[metric] - b[metric] : b[metric] - a[metric]
+      );
       
-      // Calculate percentile rank
-      const percentileRank = (studentRank / sortedStudents.length * 100).toFixed(2);
+      // Find student's TRUE rank among ALL eligible students
+      const absoluteStudentRank = sortedEligibleStudents.findIndex(s => s.Account === targetStudentId) + 1;
       
-      // Find nearby students
-      const studentIndex = sortedStudents.findIndex(s => s.Account === targetStudentId);
-      const start = Math.max(0, studentIndex - 2);
-      const end = Math.min(sortedStudents.length, studentIndex + 3);
-      const nearbyStudents = sortedStudents.slice(start, end);
+      // Find student's rank in filtered subset
+      const filteredStudentRank = sortedFilteredStudents.findIndex(s => s.Account === targetStudentId) + 1;
+      
+      // Calculate percentile ranks
+      const absolutePercentile = (absoluteStudentRank / sortedEligibleStudents.length * 100).toFixed(2);
+      const filteredPercentile = (filteredStudentRank / sortedFilteredStudents.length * 100).toFixed(2);
+      
+      // Find nearby students for visualization (from filtered students)
+      const studentFilteredIndex = sortedFilteredStudents.findIndex(s => s.Account === targetStudentId);
+      const start = Math.max(0, studentFilteredIndex - 2);
+      const end = Math.min(sortedFilteredStudents.length, studentFilteredIndex + 3);
+      const nearbyStudents = sortedFilteredStudents.slice(start, end);
       
       // Format data for visualization - add proper pass info for Lab03
-      const allStudentsFormatted = sortedStudents.map((s, index) => ({
+      const allStudentsFormatted = sortedFilteredStudents.map((s, index) => ({
         account: s.Account,
         [metric.toLowerCase()]: s[metric],
         designPass: s["Design Pass"],
@@ -308,11 +330,13 @@ const StudentPositionVisualization = () => {
         pass: s["Design Pass"] === s["Pattern Pass"] ? s["Design Pass"] : 
               `${s["Design Pass"]}/${s["Pattern Pass"]}`,
         isTarget: s.Account === targetStudentId,
-        rank: index + 1
+        rank: index + 1,
+        // Add info about where this student ranks in the full eligible set
+        absoluteRank: sortedEligibleStudents.findIndex(es => es.Account === s.Account) + 1
       }));
       
       // Create bins for histogram
-      const metricValues = sortedStudents.map(s => s[metric]);
+      const metricValues = sortedFilteredStudents.map(s => s[metric]);
       const min = Math.min(...metricValues);
       const max = Math.max(...metricValues);
       
@@ -340,7 +364,7 @@ const StudentPositionVisualization = () => {
       });
       
       // Count values in each bin
-      for (const student of sortedStudents) {
+      for (const student of sortedFilteredStudents) {
         for (let i = 0; i < bins.length; i++) {
           if (student[metric] >= bins[i].min && student[metric] < bins[i].max) {
             bins[i].count++;
@@ -353,12 +377,16 @@ const StudentPositionVisualization = () => {
       setStudentData({
         student: targetStudent,
         metric: metric,
-        rank: studentRank,
-        totalStudents: sortedStudents.length,
-        percentileRank,
+        rank: filteredStudentRank, // Filtered rank
+        absoluteRank: absoluteStudentRank, // Absolute rank among all eligible
+        totalStudents: sortedEligibleStudents.length, // All eligible students
+        filteredStudents: sortedFilteredStudents.length, // Only filtered students
+        percentileRank: filteredPercentile,
+        absolutePercentileRank: absolutePercentile,
         nearbyStudents,
         allStudents: allStudentsFormatted,
-        isLab03: true
+        isLab03: true,
+        isFiltered: true // Flag that we're showing filtered results
       });
       
       setLoading(false);
@@ -449,6 +477,27 @@ const StudentPositionVisualization = () => {
         isLowerBetter ? a[metric] - b[metric] : b[metric] - a[metric]
       );
       
+      // Get all students with valid metric data (eligibles)
+      const eligibleStudents = labData.filter(row => 
+        typeof row[metric] === 'number' && 
+        !isNaN(row[metric])
+      );
+      
+      // Sort all eligible students by the metric
+      const sortedEligibleStudents = [...eligibleStudents].sort((a, b) => 
+        isLowerBetter ? a[metric] - b[metric] : b[metric] - a[metric]
+      );
+      
+      // Get the student's absolute rank among all students
+      const absoluteStudentRank = sortedEligibleStudents.findIndex(s => s.Account === targetStudentId) + 1;
+      
+      // Get the student's filtered rank
+      const filteredStudentRank = sortedStudents.findIndex(s => s.Account === targetStudentId) + 1;
+      
+      // Calculate percentile ranks
+      const absolutePercentile = (absoluteStudentRank / sortedEligibleStudents.length * 100).toFixed(2);
+      const filteredPercentile = (filteredStudentRank / sortedStudents.length * 100).toFixed(2);
+      
       // Find student's rank based on selected metric
       const studentRank = sortedStudents.findIndex(s => s.Account === targetStudentId) + 1;
       
@@ -467,7 +516,8 @@ const StudentPositionVisualization = () => {
         [metric.toLowerCase()]: s[metric],
         pass: s.Pass,
         isTarget: s.Account === targetStudentId,
-        rank: index + 1
+        rank: index + 1,
+        absoluteRank: sortedEligibleStudents.findIndex(es => es.Account === s.Account) + 1
       }));
       
       // Create bins for histogram
@@ -512,15 +562,19 @@ const StudentPositionVisualization = () => {
       setStudentData({
         student: targetStudent,
         metric: metric,
-        rank: studentRank,
-        totalStudents: sortedStudents.length,
-        percentileRank,
+        rank: filteredStudentRank, // Filtered rank
+        absoluteRank: absoluteStudentRank, // Absolute rank
+        totalStudents: sortedEligibleStudents.length, // All eligible students
+        filteredStudents: sortedStudents.length, // Only filtered subset
+        percentileRank: filteredPercentile,
+        absolutePercentileRank: absolutePercentile,
         nearbyStudents: nearbyStudents.map((s, i) => ({
           ...s,
           rankByMetric: start + i + 1
         })),
         allStudents: allStudentsFormatted,
-        isLab03: false
+        isLab03: false,
+        isFiltered: includeFirst !== includeSecond // Flag if we're filtering (not showing all demos)
       });
       setLoading(false);
     } catch (err) {
@@ -737,14 +791,26 @@ const StudentPositionVisualization = () => {
                 <div className="stat-value">{formatValue(studentData.student[studentData.metric])}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label">Rank (by {studentData.metric})</div>
-                <div className="stat-value">{studentData.rank} of {studentData.totalStudents}</div>
+                <div className="stat-label">
+                  Rank {studentData.isFiltered && <span className="filtered-tag">(filtered)</span>}
+                </div>
+                <div className="stat-value">{studentData.rank} of {studentData.filteredStudents}</div>
                 <div className="stat-hint">Lower is better</div>
+                {studentData.isFiltered && (
+                  <div className="absolute-rank">
+                    Overall: {studentData.absoluteRank} of {studentData.totalStudents}
+                  </div>
+                )}
               </div>
               <div className="stat-card">
                 <div className="stat-label">Percentile</div>
                 <div className="stat-value">{studentData.percentileRank}%</div>
                 <div className="stat-hint">Lower is better</div>
+                {studentData.isFiltered && (
+                  <div className="absolute-rank">
+                    Overall: {studentData.absolutePercentileRank}%
+                  </div>
+                )}
               </div>
               <div className="stat-card">
                 <div className="stat-label">Lab Score</div>
