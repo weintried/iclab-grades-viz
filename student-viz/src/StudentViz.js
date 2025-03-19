@@ -151,6 +151,26 @@ const StudentPositionVisualization = () => {
     processSelectedData();
   }, [selectedWorksheet, targetStudentId, selectedMetric, includeFirstDemo, includeSecondDemo, workbook, excelFileLoaded, designFilter, patternFilter, isLab03]);
   
+  // Add a function to calculate lab scores based on lab type
+  const calculateLabScore = (lab, student, isLab03) => {
+    try {
+      if (isLab03) {
+        // Lab03: 50 + "Perf. Score" + "Pattern Score"
+        const perfScore = student["Perf. Score"] || 0;
+        const patternScore = student["Pattern Score"] || 0;
+        return 50 + perfScore + patternScore;
+      } else {
+        // Lab01 & Lab02: 70 + "Perf. Score", reduced by 30% for 2nd_demo
+        const perfScore = student["Perf. Score"] || 0;
+        const multiplier = student.Pass === "2nd_demo" ? 0.7 : 1.0;
+        return (70 + perfScore) * multiplier;
+      }
+    } catch (error) {
+      console.error("Error calculating lab score:", error);
+      return "N/A";
+    }
+  };
+
   // Special function to handle Lab03 data
   const processLab03Data = (labSheet) => {
     try {
@@ -187,6 +207,8 @@ const StudentPositionVisualization = () => {
       const latencyIndex = subHeaders.findIndex((h) => h === "Latency");
       const areaIndex = subHeaders.findIndex((h) => h === "Area");
       const perfIndex = subHeaders.findIndex((h) => h === "Performance");
+      const perfScoreIndex = subHeaders.findIndex((h) => h === "Perf. Score");
+      const patternScoreIndex = subHeaders.findIndex((h) => h === "Pattern Score");
       
       // Collect available metrics
       const availableColumns = [];
@@ -220,6 +242,8 @@ const StudentPositionVisualization = () => {
         if (latencyIndex !== -1) studentRecord.Latency = parseFloat(row[latencyIndex]) || 0;
         if (areaIndex !== -1) studentRecord.Area = parseFloat(row[areaIndex]) || 0;
         if (perfIndex !== -1) studentRecord.Performance = parseFloat(row[perfIndex]) || 0;
+        if (perfScoreIndex !== -1) studentRecord["Perf. Score"] = parseFloat(row[perfScoreIndex]) || 0;
+        if (patternScoreIndex !== -1) studentRecord["Pattern Score"] = parseFloat(row[patternScoreIndex]) || 0;
         
         processedData.push(studentRecord);
       }
@@ -373,6 +397,9 @@ const StudentPositionVisualization = () => {
         }
       }
       
+      // Calculate lab score for the target student
+      const labScore = calculateLabScore(selectedWorksheet, targetStudent, true);
+      
       setDistribution(bins);
       setStudentData({
         student: targetStudent,
@@ -386,7 +413,8 @@ const StudentPositionVisualization = () => {
         nearbyStudents,
         allStudents: allStudentsFormatted,
         isLab03: true,
-        isFiltered: true // Flag that we're showing filtered results
+        isFiltered: true, // Flag that we're showing filtered results
+        labScore: labScore // Add calculated lab score
       });
       
       setLoading(false);
@@ -558,6 +586,9 @@ const StudentPositionVisualization = () => {
         }
       }
       
+      // Calculate lab score for the target student
+      const labScore = calculateLabScore(selectedWorksheet, targetStudent, false);
+      
       setDistribution(bins);
       setStudentData({
         student: targetStudent,
@@ -574,7 +605,8 @@ const StudentPositionVisualization = () => {
         })),
         allStudents: allStudentsFormatted,
         isLab03: false,
-        isFiltered: includeFirst !== includeSecond // Flag if we're filtering (not showing all demos)
+        isFiltered: includeFirst !== includeSecond, // Flag if we're filtering (not showing all demos)
+        labScore: labScore // Add calculated lab score
       });
       setLoading(false);
     } catch (err) {
@@ -814,7 +846,11 @@ const StudentPositionVisualization = () => {
               </div>
               <div className="stat-card">
                 <div className="stat-label">Lab Score</div>
-                <div className="stat-value">{studentData.student[`${selectedWorksheet} Score`] || "N/A"}</div>
+                <div className="stat-value">
+                  {typeof studentData.labScore === 'number' 
+                    ? studentData.labScore.toFixed(1) 
+                    : studentData.labScore || "N/A"}
+                </div>
               </div>
             </div>
             
