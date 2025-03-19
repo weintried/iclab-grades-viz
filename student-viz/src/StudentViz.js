@@ -12,7 +12,7 @@ const StudentPositionVisualization = () => {
   const [excelFileLoaded, setExcelFileLoaded] = useState(false);
   
   // Available metrics for visualization
-  const availableMetrics = ["Area", "Latency", "Power", "Performance"];
+  const availableMetrics = ["Area", "Latency", "Power", "Performance", "CT"];
 
   // Format value based on magnitude - moved to component scope
   const formatValue = (value) => {
@@ -32,6 +32,11 @@ const StudentPositionVisualization = () => {
   const [availableColumnsInSheet, setAvailableColumnsInSheet] = useState([]);
   const [errorMessage, setErrorMessage] = useState(null);
   const [workbook, setWorkbook] = useState(null);
+  
+  // New state variables for Lab03 specific filters
+  const [isLab03, setIsLab03] = useState(false);
+  const [designFilter, setDesignFilter] = useState({first: true, second: true});
+  const [patternFilter, setPatternFilter] = useState({first: true, second: true});
 
   const scrollToTargetRow = () => {
     if (targetRowRef.current) {
@@ -87,6 +92,11 @@ const StudentPositionVisualization = () => {
 
     loadExcelFile();
   }, []);
+  
+  // Effect to detect if Lab03 is selected
+  useEffect(() => {
+    setIsLab03(selectedWorksheet === "Lab03");
+  }, [selectedWorksheet]);
 
   // Function to handle form submission
   const handleSubmit = (e) => {
@@ -119,45 +129,14 @@ const StudentPositionVisualization = () => {
           return;
         }
         
-        const labData = XLSX.utils.sheet_to_json(labSheet);
-        
-        // Find the target student
-        const targetStudent = labData.find(row => row.Account === targetStudentId);
-        
-        if (!targetStudent) {
-          setErrorMessage(`Student ${targetStudentId} not found in ${selectedWorksheet}`);
-          setLoading(false);
-          return;
+        // Special handling for Lab03 with nested structure
+        if (selectedWorksheet === "Lab03") {
+          processLab03Data(labSheet);
+        } else {
+          // Normal processing for other labs
+          const labData = XLSX.utils.sheet_to_json(labSheet);
+          processRegularLabData(labData);
         }
-        
-        // More robust column detection - check which metrics exist in the data
-        const sampleSize = Math.min(labData.length, 10);
-        const sampleStudents = labData.slice(0, sampleSize);
-        
-        // Collect all unique property names from the sample students
-        const allProperties = new Set();
-        sampleStudents.forEach(student => {
-          Object.keys(student).forEach(key => allProperties.add(key));
-        });
-        
-        console.log("All detected properties:", Array.from(allProperties));
-        
-        // Filter to only include our metrics of interest
-        const availableColumns = availableMetrics.filter(metric => 
-          Array.from(allProperties).includes(metric)
-        );
-        
-        console.log("Available metrics:", availableColumns);
-        
-        setAvailableColumnsInSheet(availableColumns);
-        
-        // If current selectedMetric is not available, select the first available metric
-        if (!availableColumns.includes(selectedMetric) && availableColumns.length > 0) {
-          setSelectedMetric(availableColumns[0]);
-        }
-        
-        // Process the data based on filters and selected metric
-        processData(labData, targetStudent, selectedMetric, includeFirstDemo, includeSecondDemo);
       } catch (err) {
         setErrorMessage("Error analyzing student data: " + err.message);
         setLoading(false);
@@ -165,9 +144,265 @@ const StudentPositionVisualization = () => {
     };
 
     processSelectedData();
-  }, [selectedWorksheet, targetStudentId, selectedMetric, includeFirstDemo, includeSecondDemo, workbook, excelFileLoaded]);
+  }, [selectedWorksheet, targetStudentId, selectedMetric, includeFirstDemo, includeSecondDemo, workbook, excelFileLoaded, designFilter, patternFilter, isLab03]);
   
-  // Separate data processing function to call when filters change
+  // Special function to handle Lab03 data
+  const processLab03Data = (labSheet) => {
+    try {
+      // Convert to raw data to handle nested structure manually
+      const rawData = XLSX.utils.sheet_to_json(labSheet, { header: 1 });
+      
+      // Find header row indexes
+      let headers = rawData[0]; // First row typically contains header names
+      let performanceIndex = -1;
+      
+      // Find "Performance Results" column index
+      for (let i = 0; i < headers.length; i++) {
+        if (headers[i] === "Performance Results") {
+          performanceIndex = i;
+          break;
+        }
+      }
+      
+      if (performanceIndex === -1) {
+        throw new Error("Could not find 'Performance Results' header in Lab03");
+      }
+      
+      // Determine column indexes for required data
+      const accountIndex = headers.indexOf("Account");
+      
+      // Find index of Design Pass and Pattern Pass in the subheader row
+      const subHeaders = rawData[1] || []; // Second row contains subheaders
+      
+      const designPassIndex = subHeaders.findIndex((h) => h === "Design Pass");
+      const patternPassIndex = subHeaders.findIndex((h) => h === "Pattern Pass");
+      
+      // Find performance metric indexes from subheaders
+      const ctIndex = subHeaders.findIndex((h) => h === "CT");
+      const latencyIndex = subHeaders.findIndex((h) => h === "Latency");
+      const areaIndex = subHeaders.findIndex((h) => h === "Area");
+      const perfIndex = subHeaders.findIndex((h) => h === "Performance");
+      
+      // Collect available metrics
+      const availableColumns = [];
+      if (ctIndex !== -1) availableColumns.push("CT");
+      if (latencyIndex !== -1) availableColumns.push("Latency");
+      if (areaIndex !== -1) availableColumns.push("Area");
+      if (perfIndex !== -1) availableColumns.push("Performance");
+      
+      setAvailableColumnsInSheet(availableColumns);
+      
+      // If selected metric isn't available, select first available
+      if (!availableColumns.includes(selectedMetric) && availableColumns.length > 0) {
+        setSelectedMetric(availableColumns[0]);
+      }
+      
+      // Process data rows (start from row 2, index 2)
+      const processedData = [];
+      
+      for (let i = 2; i < rawData.length; i++) {
+        const row = rawData[i];
+        if (!row[accountIndex]) continue; // Skip rows with no account
+        
+        const studentRecord = {
+          Account: row[accountIndex],
+          "Design Pass": designPassIndex !== -1 ? row[designPassIndex] : null,
+          "Pattern Pass": patternPassIndex !== -1 ? row[patternPassIndex] : null
+        };
+        
+        // Add performance metrics
+        if (ctIndex !== -1) studentRecord.CT = parseFloat(row[ctIndex]) || 0;
+        if (latencyIndex !== -1) studentRecord.Latency = parseFloat(row[latencyIndex]) || 0;
+        if (areaIndex !== -1) studentRecord.Area = parseFloat(row[areaIndex]) || 0;
+        if (perfIndex !== -1) studentRecord.Performance = parseFloat(row[perfIndex]) || 0;
+        
+        processedData.push(studentRecord);
+      }
+      
+      // Find target student
+      const targetStudent = processedData.find(row => row.Account === targetStudentId);
+      
+      if (!targetStudent) {
+        setErrorMessage(`Student ${targetStudentId} not found in ${selectedWorksheet}`);
+        setLoading(false);
+        return;
+      }
+      
+      // Process the data based on Lab03 specific filters
+      processLab03FilteredData(processedData, targetStudent, selectedMetric);
+      
+    } catch (err) {
+      setErrorMessage("Error processing Lab03 data: " + err.message);
+      setLoading(false);
+    }
+  };
+  
+  // Function to filter and process Lab03 data
+  const processLab03FilteredData = (labData, targetStudent, metric) => {
+    try {
+      // Ensure metric exists in the data
+      if (!targetStudent.hasOwnProperty(metric)) {
+        setErrorMessage(`Metric "${metric}" not found in the data`);
+        setLoading(false);
+        return;
+      }
+      
+      // Apply Design and Pattern pass filters
+      let filteredStudents = labData.filter(student => {
+        // Check Design Pass filter
+        const designMatch = (designFilter.first && student["Design Pass"] === "1st_demo") || 
+                          (designFilter.second && student["Design Pass"] === "2nd_demo");
+        
+        // Check Pattern Pass filter
+        const patternMatch = (patternFilter.first && student["Pattern Pass"] === "1st_demo") || 
+                           (patternFilter.second && student["Pattern Pass"] === "2nd_demo");
+        
+        // Both design and pattern conditions must be met
+        return designMatch && patternMatch && 
+               typeof student[metric] === 'number' && 
+               !isNaN(student[metric]);
+      });
+      
+      if (filteredStudents.length === 0) {
+        setErrorMessage("No students match the selected filters");
+        setStudentData(null);
+        setLoading(false);
+        return;
+      }
+      
+      // Clear any previous errors
+      setErrorMessage(null);
+      
+      // For metrics where lower values are better (assumed for all metrics)
+      const isLowerBetter = true;
+      
+      // Sort students by the selected metric
+      const sortedStudents = [...filteredStudents].sort((a, b) => 
+        isLowerBetter ? a[metric] - b[metric] : b[metric] - a[metric]
+      );
+      
+      // Find student's rank
+      const studentRank = sortedStudents.findIndex(s => s.Account === targetStudentId) + 1;
+      
+      // Calculate percentile rank
+      const percentileRank = (studentRank / sortedStudents.length * 100).toFixed(2);
+      
+      // Find nearby students
+      const studentIndex = sortedStudents.findIndex(s => s.Account === targetStudentId);
+      const start = Math.max(0, studentIndex - 2);
+      const end = Math.min(sortedStudents.length, studentIndex + 3);
+      const nearbyStudents = sortedStudents.slice(start, end);
+      
+      // Format data for visualization
+      const allStudentsFormatted = sortedStudents.map((s, index) => ({
+        account: s.Account,
+        [metric.toLowerCase()]: s[metric],
+        designPass: s["Design Pass"],
+        patternPass: s["Pattern Pass"],
+        isTarget: s.Account === targetStudentId,
+        rank: index + 1
+      }));
+      
+      // Create bins for histogram
+      const metricValues = sortedStudents.map(s => s[metric]);
+      const min = Math.min(...metricValues);
+      const max = Math.max(...metricValues);
+      
+      // Create bins
+      const binCount = 10;
+      const binWidth = (max - min) / binCount;
+      const bins = Array(binCount).fill(0).map((_, i) => {
+        const binMin = min + i * binWidth;
+        const binMax = min + (i+1) * binWidth;
+        
+        let rangeFormat;
+        if (max > 1000) {
+          rangeFormat = `${(binMin/1000).toFixed(1)}k-${(binMax/1000).toFixed(1)}k`;
+        } else {
+          rangeFormat = `${binMin.toFixed(1)}-${binMax.toFixed(1)}`;
+        }
+        
+        return {
+          range: rangeFormat,
+          count: 0,
+          min: binMin,
+          max: binMax,
+          containsTarget: targetStudent[metric] >= binMin && targetStudent[metric] < binMax
+        };
+      });
+      
+      // Count values in each bin
+      for (const student of sortedStudents) {
+        for (let i = 0; i < bins.length; i++) {
+          if (student[metric] >= bins[i].min && student[metric] < bins[i].max) {
+            bins[i].count++;
+            break;
+          }
+        }
+      }
+      
+      setDistribution(bins);
+      setStudentData({
+        student: targetStudent,
+        metric: metric,
+        rank: studentRank,
+        totalStudents: sortedStudents.length,
+        percentileRank,
+        nearbyStudents,
+        allStudents: allStudentsFormatted,
+        isLab03: true
+      });
+      
+      setLoading(false);
+    } catch (err) {
+      setErrorMessage("Error processing Lab03 data: " + err.message);
+      setLoading(false);
+    }
+  };
+  
+  // Regular processing for non-Lab03 data
+  const processRegularLabData = (labData) => {
+    try {
+      // Find the target student
+      const targetStudent = labData.find(row => row.Account === targetStudentId);
+      
+      if (!targetStudent) {
+        setErrorMessage(`Student ${targetStudentId} not found in ${selectedWorksheet}`);
+        setLoading(false);
+        return;
+      }
+      
+      // More robust column detection - check which metrics exist in the data
+      const sampleSize = Math.min(labData.length, 10);
+      const sampleStudents = labData.slice(0, sampleSize);
+      
+      // Collect all unique property names from the sample students
+      const allProperties = new Set();
+      sampleStudents.forEach(student => {
+        Object.keys(student).forEach(key => allProperties.add(key));
+      });
+      
+      // Filter to only include our metrics of interest
+      const availableColumns = availableMetrics.filter(metric => 
+        Array.from(allProperties).includes(metric)
+      );
+      
+      setAvailableColumnsInSheet(availableColumns);
+      
+      // If current selectedMetric is not available, select the first available metric
+      if (!availableColumns.includes(selectedMetric) && availableColumns.length > 0) {
+        setSelectedMetric(availableColumns[0]);
+      }
+      
+      // Process the data based on filters and selected metric
+      processData(labData, targetStudent, selectedMetric, includeFirstDemo, includeSecondDemo);
+    } catch (err) {
+      setErrorMessage("Error analyzing student data: " + err.message);
+      setLoading(false);
+    }
+  };
+  
+  // Regular data processing function for non-Lab03
   const processData = (labData, targetStudent, metric, includeFirst, includeSecond) => {
     try {
       // Ensure metric exists in the data
@@ -183,9 +418,8 @@ const StudentPositionVisualization = () => {
       if (includeSecond) passCriteria.push("2nd_demo");
       
       if (passCriteria.length === 0) {
-        // Instead of setting error state, set the error message
         setErrorMessage("At least one demo type must be selected");
-        setStudentData(null); // Clear data but keep UI
+        setStudentData(null);
         setLoading(false);
         return;
       }
@@ -200,7 +434,6 @@ const StudentPositionVisualization = () => {
       );
       
       // For metrics where lower values are better (assumed for all metrics)
-      // Can be customized if needed
       const isLowerBetter = true;
       
       // Sort students by the selected metric
@@ -241,7 +474,6 @@ const StudentPositionVisualization = () => {
         const binMin = min + i * binWidth;
         const binMax = min + (i+1) * binWidth;
         
-        // Format the range display differently based on the magnitude of values
         let rangeFormat;
         if (max > 1000) {
           rangeFormat = `${(binMin/1000).toFixed(1)}k-${(binMax/1000).toFixed(1)}k`;
@@ -279,7 +511,8 @@ const StudentPositionVisualization = () => {
           ...s,
           rankByMetric: start + i + 1
         })),
-        allStudents: allStudentsFormatted
+        allStudents: allStudentsFormatted,
+        isLab03: false
       });
       setLoading(false);
     } catch (err) {
@@ -353,7 +586,7 @@ const StudentPositionVisualization = () => {
       )}
       
       {/* Only show controls if we have a selected student */}
-      {targetStudentId && (
+      {targetStudentId && !isLab03 && (
         <div className="controls-container">
           <h3 className="controls-header">Configure Visualization</h3>
           <div className="controls-flex-container">
@@ -403,12 +636,89 @@ const StudentPositionVisualization = () => {
         </div>
       )}
       
+      {/* Lab03 Specific Controls */}
+      {targetStudentId && isLab03 && (
+        <div className="controls-container">
+          <h3 className="controls-header">Lab03 Configuration</h3>
+          <div className="controls-flex-container">
+            <div className="filter-controls">
+              <h3>Design Pass:</h3>
+              <div className="checkbox-group">
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    className="large-checkbox"
+                    checked={designFilter.first} 
+                    onChange={() => setDesignFilter({...designFilter, first: !designFilter.first})}
+                  />
+                  <span>1st_demo</span>
+                </label>
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    className="large-checkbox"
+                    checked={designFilter.second} 
+                    onChange={() => setDesignFilter({...designFilter, second: !designFilter.second})} 
+                  />
+                  <span>2nd_demo</span>
+                </label>
+              </div>
+            </div>
+            
+            <div className="filter-controls">
+              <h3>Pattern Pass:</h3>
+              <div className="checkbox-group">
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    className="large-checkbox"
+                    checked={patternFilter.first} 
+                    onChange={() => setPatternFilter({...patternFilter, first: !patternFilter.first})}
+                  />
+                  <span>1st_demo</span>
+                </label>
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    className="large-checkbox"
+                    checked={patternFilter.second} 
+                    onChange={() => setPatternFilter({...patternFilter, second: !patternFilter.second})} 
+                  />
+                  <span>2nd_demo</span>
+                </label>
+              </div>
+            </div>
+            
+            <div className="metric-selector">
+              <h3>Select Metric:</h3>
+              <div className="radio-group">
+                {availableColumnsInSheet.map(metricName => (
+                  <label key={metricName} className="radio-label">
+                    <input
+                      type="radio"
+                      className="large-radio"
+                      name="metric"
+                      value={metricName}
+                      checked={selectedMetric === metricName}
+                      onChange={() => handleMetricChange(metricName)}
+                    />
+                    <span>{metricName}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Show visualization panels only if we have data */}
       <div className={`visualization-content ${!studentData ? 'disabled-content' : ''}`}>
         {!studentData ? (
           <div className="no-data-overlay">
             <div className="no-data-message">
-              {targetStudentId ? "Select at least one demo type to view visualizations" : "Enter a student ID to view analysis"}
+              {targetStudentId ? 
+                (isLab03 ? "Select at least one filter for Design and Pattern" : "Select at least one demo type to view visualizations")
+              : "Enter a student ID to view analysis"}
             </div>
           </div>
         ) : (
@@ -430,7 +740,7 @@ const StudentPositionVisualization = () => {
               </div>
               <div className="stat-card">
                 <div className="stat-label">Lab Score</div>
-                <div className="stat-value">{studentData.student[`${selectedWorksheet} Score`]}</div>
+                <div className="stat-value">{studentData.student[`${selectedWorksheet} Score`] || "N/A"}</div>
               </div>
             </div>
             
