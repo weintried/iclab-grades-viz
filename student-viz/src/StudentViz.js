@@ -19,6 +19,11 @@ const StudentPositionVisualization = () => {
     return value > 1000 ? (value/1000).toFixed(2) + 'k' : value.toFixed(2);
   };
 
+  // Add this new function to ensure consistent unit display
+  const formatValueConsistentUnit = (value, useThousands) => {
+    return useThousands ? (value/1000).toFixed(2) + 'k' : value.toFixed(2);
+  };
+
   const [studentData, setStudentData] = useState(null);
   const [distribution, setDistribution] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -293,12 +298,15 @@ const StudentPositionVisualization = () => {
       const end = Math.min(sortedStudents.length, studentIndex + 3);
       const nearbyStudents = sortedStudents.slice(start, end);
       
-      // Format data for visualization
+      // Format data for visualization - add proper pass info for Lab03
       const allStudentsFormatted = sortedStudents.map((s, index) => ({
         account: s.Account,
         [metric.toLowerCase()]: s[metric],
         designPass: s["Design Pass"],
         patternPass: s["Pattern Pass"],
+        // Add a combined pass field for easier rendering in the charts
+        pass: s["Design Pass"] === s["Pattern Pass"] ? s["Design Pass"] : 
+              `${s["Design Pass"]}/${s["Pattern Pass"]}`,
         isTarget: s.Account === targetStudentId,
         rank: index + 1
       }));
@@ -813,7 +821,8 @@ const StudentPositionVisualization = () => {
                       {studentData.allStudents.map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
-                          fill={entry.isTarget ? '#FF5722' : entry.pass === '1st_demo' ? '#8884d8' : '#82ca9d'} 
+                          fill={entry.isTarget ? '#FF5722' : 
+                                entry.pass === '1st_demo' || entry.pass?.includes('1st_demo') ? '#8884d8' : '#82ca9d'} 
                           r={entry.isTarget ? 8 : 4}
                         />
                       ))}
@@ -843,30 +852,40 @@ const StudentPositionVisualization = () => {
                   <tr>
                     <th>Rank</th>
                     <th>Account</th>
-                    <th>Pass</th>
+                    <th>{isLab03 ? 'Design/Pattern' : 'Pass'}</th>
                     <th>{studentData.metric}</th>
                     <th>Difference</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {studentData.allStudents.map((s) => (
-                    <tr 
-                      key={s.account} 
-                      ref={s.account === targetStudentId ? targetRowRef : null} 
-                      className={s.account === targetStudentId ? 'highlight-row' : ''}
-                    >
-                      <td>{s.rank}</td>
-                      <td className="font-medium">
-                        {s.account} {s.account === targetStudentId ? '(YOU)' : ''}
-                      </td>
-                      <td>{s.pass}</td>
-                      <td>{formatValue(s[studentData.metric.toLowerCase()])}</td>
-                      <td>
-                        {s.account === targetStudentId ? '-' : 
-                          formatValue(s[studentData.metric.toLowerCase()] - studentData.student[studentData.metric])}
-                      </td>
-                    </tr>
-                  ))}
+                  {studentData.allStudents.map((s) => {
+                    // Calculate difference
+                    const difference = s[studentData.metric.toLowerCase()] - studentData.student[studentData.metric];
+                    // Check if the metric values are generally in thousands (use the target student as reference)
+                    const useThousands = studentData.student[studentData.metric] > 1000;
+                    
+                    return (
+                      <tr 
+                        key={s.account} 
+                        ref={s.account === targetStudentId ? targetRowRef : null} 
+                        className={s.account === targetStudentId ? 'highlight-row' : ''}
+                      >
+                        <td>{s.rank}</td>
+                        <td className="font-medium">
+                          {s.account} {s.account === targetStudentId ? '(YOU)' : ''}
+                        </td>
+                        <td>
+                          {isLab03 ? 
+                            `${s.designPass || 'N/A'}/${s.patternPass || 'N/A'}` : 
+                            s.pass}
+                        </td>
+                        <td>{formatValue(s[studentData.metric.toLowerCase()])}</td>
+                        <td>
+                          {s.account === targetStudentId ? '-' : formatValueConsistentUnit(difference, useThousands)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
